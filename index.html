@@ -57,6 +57,41 @@
         <button type="button" id="print" data-i18n="site.print"></button>
       </div>
     </section>
+
+    <section class="panel" id="browse">
+      <h2 data-i18n="site.browse"></h2>
+      <p class="hint" data-i18n="site.browse.hint"></p>
+      <div class="filters">
+        <label for="f-region" data-i18n="site.card.region"></label>
+        <select id="f-region"></select>
+        <label for="f-group" data-i18n="site.material"></label>
+        <select id="f-group"></select>
+        <label for="f-strength" data-i18n="site.browse.minstrength"></label>
+        <input id="f-strength" inputmode="decimal" autocomplete="off">
+        <input type="checkbox" id="f-lab">
+        <label for="f-lab" data-i18n="site.browse.lab"></label>
+      </div>
+      <p class="error" id="browse-error" role="alert"></p>
+      <p class="midpoint" id="browse-count"></p>
+      <p class="hint" id="browse-left-out"></p>
+      <table class="list" id="browse-list">
+        <thead><tr>
+          <th data-i18n="site.col.quarry"></th><th class="num" data-i18n="site.col.strength"></th>
+        </tr></thead>
+        <tbody id="browse-body"></tbody>
+      </table>
+      <div class="actions">
+        <button type="button" id="browse-more" data-i18n="site.more" hidden></button>
+        <button type="button" id="browse-export" data-i18n="site.browse.export"></button>
+      </div>
+      <details>
+        <summary data-i18n="site.summary"></summary>
+        <table class="lab" id="summary">
+          <thead><tr id="summary-head"></tr></thead>
+          <tbody id="summary-body"></tbody>
+        </table>
+      </details>
+    </section>
   </div>
 
   <div class="right">

@@ -8,6 +8,7 @@ import { rank, quarrySnap, warning } from "./haul.js";
 import { makeT, applyTo } from "./i18n.js";
 import { exportRows, strengthText, reservesValue, lengthText, warningText } from "./exportrows.js";
 import { workbook } from "./xlsx.js";
+import { filterQuarries, regionSummary, catalogueRows, attributeText, samples, ATTRIBUTES, BALANCE } from "./catalogue.js";
 
 const LANGS = ["uz", "ru", "en"];
 const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -23,6 +24,7 @@ const state = {
   searched: null,        // {start, end, mid, group} of the last search
   shown: 0,
   selected: null,        // quarry_id
+  browse: { list: [], shown: 0, withoutStrength: 0 },   // the filtered register list
   map: null, layers: {},
 };
 
@@ -291,6 +293,7 @@ function select(quarryId) {
     if (position >= state.shown) state.shown = position + 1;      // a quarry picked on the map joins the list
     renderResults();
   }
+  renderBrowse();
   renderCard();
   drawRoute();
 }
@@ -347,20 +350,131 @@ function renderCard() {
     ? el("ul", {}, q.findings.map((code) => el("li", { text: t("cat." + code) })))
     : el("p", { cls: "hint", text: t("site.card.findings.none") }));
 
+  // what people entered beside the source tables; an empty field says so, it is never left out
+  const more = [el("summary", { text: t("site.card.more") }),
+    el("dl", { cls: "attrs" }, ATTRIBUTES.flatMap((field) => pair(t("site.attr." + field), attributeText(q, field, t))))];
+  if (q.balance_deposit) {
+    more.push(el("p", { cls: "hint", text: t("site.card.balance") }),
+      el("dl", { cls: "attrs" }, BALANCE.flatMap((field) => pair(t("site.attr." + field), q[field] || t("site.card.nodata")))));
+  }
+  parts.push(el("details", {}, more));
+
   if (q.lab.length) {
-    const head = el("tr", {}, ["site.lab.indicator", "site.lab.unit", "site.lab.standard", "site.lab.obtained", "site.lab.compliance"]
-      .map((key) => el("th", { text: t(key) })));
-    const body = q.lab.map((row) => el("tr", {}, [row.indicator, row.unit, row.standard_value, row.obtained_value, row.compliance]
-      .map((value) => el("td", { text: value }))));
-    parts.push(el("details", {}, [
-      el("summary", { text: t("site.card.lab") }),
-      el("p", { cls: "hint", text: t("site.card.survey", { id: q.survey_id, sampled: q.sampled, tested: q.tested }) }),
-      el("table", { cls: "lab" }, [el("thead", {}, [head]), el("tbody", {}, body)]),
-    ]));
+    // one table per sample: a later survey of the quarry stands beside the earlier one, never mixed with it
+    const blocks = [el("summary", { text: t("site.card.lab") })];
+    for (const sample of samples(q.lab)) {
+      const withMethod = sample.rows.some((row) => row.method);
+      const keys = ["site.lab.indicator", "site.lab.unit", "site.lab.standard", "site.lab.obtained", "site.lab.compliance"];
+      const head = el("tr", {}, [...keys, ...(withMethod ? ["site.lab.method"] : [])].map((key) => el("th", { text: t(key) })));
+      const body = sample.rows.map((row) => el("tr", {},
+        [row.indicator, row.unit, row.standard_value, row.obtained_value, row.compliance, ...(withMethod ? [row.method] : [])]
+          .map((value) => el("td", { text: value }))));
+      const title = sample.laboratory
+        ? t("site.card.samplelab", { id: sample.id, laboratory: sample.laboratory, tested: sample.tested })
+        : t("site.card.sample", { id: sample.id }) + ". " + t("site.card.survey", { id: q.survey_id, sampled: q.sampled, tested: sample.tested });
+      blocks.push(el("p", { cls: "hint", text: title }),
+        el("table", { cls: "lab" }, [el("thead", {}, [head]), el("tbody", {}, body)]));
+    }
+    parts.push(el("details", {}, blocks));
   } else {
     parts.push(el("p", { cls: "hint", text: t("site.card.lab.none") }));
   }
   card.replaceChildren(...parts);
+}
+
+// ---------------------------------------------------------------- browsing the register
+
+function fillFilters() {
+  const t = state.t, { meta } = state.data;
+  const region = $("f-region"), group = $("f-group");
+  const chosenRegion = region.value || "", chosenGroup = group.value || "0";
+  region.replaceChildren(
+    el("option", { text: t("site.browse.region.all"), attrs: { value: "" } }),
+    ...meta.regions.map((code) => el("option", { text: t("region." + code), attrs: { value: code } })));
+  group.replaceChildren(
+    el("option", { text: t("site.material.all"), attrs: { value: "0" } }),
+    ...meta.groups.map((_, i) => el("option", { text: t("group." + (i + 1)), attrs: { value: String(i + 1) } })));
+  region.value = chosenRegion;
+  group.value = chosenGroup;
+}
+
+/** The filters as typed, or null when the strength is not a number. */
+function readFilters() {
+  const typed = $("f-strength").value.trim();
+  const strength = typed === "" ? null : parseCoordinate(typed);      // the same number reading: comma or point
+  const bad = typed !== "" && (strength === null || strength < 0);
+  $("f-strength").classList.toggle("bad", bad);
+  $("browse-error").textContent = bad ? state.t("site.browse.err") : "";
+  if (bad) return null;
+  return { region: $("f-region").value, group: Number($("f-group").value), minStrengthMpa: strength, labOnly: Boolean($("f-lab").checked) };
+}
+
+function applyFilters() {
+  const filters = readFilters();
+  if (!filters) return;                      // the list stays as it was until the number is put right
+  const { list, withoutStrength } = filterQuarries(state.data.quarries, filters);
+  state.browse = { list, withoutStrength, shown: Math.min(state.data.meta.results_shown, list.length) };
+  const active = filters.region || filters.group || filters.minStrengthMpa !== null || filters.labOnly;
+  const kept = new Set(list.map((q) => q.quarry_id));
+  for (const [id, marker] of state.layers.markers) {
+    const dim = active && !kept.has(id);
+    marker.setStyle({ opacity: dim ? 0.25 : 1, fillOpacity: dim ? 0.12 : 0.95 });
+  }
+  renderBrowse();
+}
+
+function renderBrowse() {
+  const t = state.t, { list, shown, withoutStrength } = state.browse;
+  $("browse-count").textContent = t("site.browse.count", { n: String(list.length), total: String(state.data.quarries.length) });
+  $("browse-left-out").textContent = withoutStrength ? t("site.browse.nostrength", { n: String(withoutStrength) }) : "";
+  $("browse-list").hidden = list.length === 0;
+  $("browse-export").disabled = list.length === 0;
+  $("browse-more").hidden = shown >= list.length;
+  $("browse-body").replaceChildren(...list.slice(0, shown).map((q) => {
+    const mark = warningText(q, t);
+    const strength = q.strength_min_mpa === null ? t("site.card.nodata")
+      : (q.strength_min_mpa === q.strength_max_mpa ? String(q.strength_min_mpa) : q.strength_min_mpa + "–" + q.strength_max_mpa);
+    const row = el("tr", { cls: q.quarry_id === state.selected ? "selected" : "", attrs: { tabindex: "0" } }, [
+      el("td", {}, [
+        el("span", { text: q.quarry_id + " " + q.name }),
+        el("span", { cls: "sub", text: q.rock_type + ", " + q.district }),
+        mark ? el("span", { cls: "sub warn", text: "⚠ " + mark }) : null,
+      ]),
+      el("td", { cls: "num", text: strength }),
+    ]);
+    const choose = () => select(q.quarry_id);
+    row.addEventListener("click", choose);
+    row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); } });
+    return row;
+  }));
+}
+
+function renderSummary() {
+  const t = state.t, { meta, quarries } = state.data;
+  const rows = regionSummary(quarries, meta.groups.length);
+  const cells = (first, numbers, cls) => el("tr", { cls: cls || "" }, [el("td", { text: first }), ...numbers.map((n) => el("td", { text: n }))]);
+  $("summary-head").replaceChildren(
+    el("th", { text: t("site.card.region") }),
+    ...meta.groups.map((_, i) => el("th", { text: t("group." + (i + 1)) })),
+    el("th", { text: t("site.summary.total") }), el("th", { text: t("site.browse.lab") }));
+  const sum = (pick) => rows.reduce((total, row) => total + pick(row), 0);
+  $("summary-body").replaceChildren(
+    ...rows.map((row) => cells(t("region." + row.region), [...row.groups, row.total, row.lab])),
+    cells(t("site.summary.total"), [...meta.groups.map((_, i) => sum((row) => row.groups[i])), sum((row) => row.total), sum((row) => row.lab)], "total"));
+}
+
+function download(bytes, name) {
+  const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const link = el("a", { attrs: { href: URL.createObjectURL(blob), download: name } });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+}
+
+function exportBrowse() {
+  if (!state.browse.list.length) return;
+  download(workbook(state.t("site.col.quarry"), catalogueRows(state.browse.list, state.t)), "register-" + state.data.meta.built + ".xlsx");
 }
 
 // ---------------------------------------------------------------- route on the map
@@ -398,13 +512,7 @@ function currentRows() {
 
 function exportExcel() {
   if (!state.results || !state.results.length) return;
-  const bytes = workbook(state.t("site.col.quarry"), currentRows());
-  const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const link = el("a", { attrs: { href: URL.createObjectURL(blob), download: "quarries-" + state.data.meta.built + ".xlsx" } });
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  download(workbook(state.t("site.col.quarry"), currentRows()), "quarries-" + state.data.meta.built + ".xlsx");
 }
 
 /** The same rows as the export, as a table that only shows on paper. */
@@ -460,6 +568,9 @@ function setLanguage(lang) {
   applyTo(document, state.t);
   for (const button of $("langs").querySelectorAll("button")) button.setAttribute("aria-pressed", String(button.dataset.lang === lang));
   fillMaterials();
+  fillFilters();
+  renderSummary();
+  renderBrowse();
   renderLegend();
   renderFooter();
   drawSection();
@@ -489,11 +600,16 @@ export async function init() {
   }
   $("layout").hidden = false;          // the map needs its real size before it is drawn
   buildMap();
+  state.browse = { list: state.data.quarries, withoutStrength: 0, shown: Math.min(state.data.meta.results_shown, state.data.quarries.length) };
   setLanguage(savedLanguage());
   for (const id of ["start-lat", "start-lon", "end-lat", "end-lon"]) $(id).addEventListener("input", readFields);
   $("find").addEventListener("click", find);
   $("more").addEventListener("click", () => { state.shown = Math.min(state.shown + state.data.meta.results_shown, state.results.length); renderResults(); });
   $("export").addEventListener("click", exportExcel);
+  for (const id of ["f-region", "f-group", "f-lab"]) $(id).addEventListener("change", applyFilters);
+  $("f-strength").addEventListener("input", applyFilters);
+  $("browse-more").addEventListener("click", () => { state.browse.shown = Math.min(state.browse.shown + state.data.meta.results_shown, state.browse.list.length); renderBrowse(); });
+  $("browse-export").addEventListener("click", exportBrowse);
   $("print").addEventListener("click", () => window.print());
   for (const button of $("langs").querySelectorAll("button")) button.addEventListener("click", () => setLanguage(button.dataset.lang));
   status.textContent = "";
