@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title></title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+<header class="top">
+  <h1 data-i18n="site.title"></h1>
+  <nav class="langs" id="langs">
+    <button type="button" data-lang="uz" data-i18n="site.lang.uz"></button>
+    <button type="button" data-lang="ru" data-i18n="site.lang.ru"></button>
+    <button type="button" data-lang="en" data-i18n="site.lang.en"></button>
+  </nav>
+</header>
+
+<p id="boot" class="status">Agar bu satr yoʻqolmasa, sahifa ishga tushmagan: uni diskdagi fayl sifatida emas, veb-server orqali (http bilan boshlanadigan manzil) oching.<br>Если эта строка не исчезает, страница не запустилась: откройте её через веб-сервер (адрес начинается с http), а не как файл с диска.<br>If this line stays, the page has not started: open it through a web server (an address beginning with http), not as a file from the disk.</p>
+<p id="status" class="status" role="status"></p>
+
+<main class="layout" id="layout" hidden>
+  <div class="left">
+    <section class="panel" id="search">
+      <h2 data-i18n="site.section"></h2>
+      <div class="ends">
+        <span></span><span class="colhead" data-i18n="site.lat"></span><span class="colhead" data-i18n="site.lon"></span>
+        <label for="start-lat" data-i18n="site.start"></label>
+        <input id="start-lat" inputmode="decimal" autocomplete="off" data-i18n-title="site.lat">
+        <input id="start-lon" inputmode="decimal" autocomplete="off" data-i18n-title="site.lon">
+        <label for="end-lat" data-i18n="site.end"></label>
+        <input id="end-lat" inputmode="decimal" autocomplete="off" data-i18n-title="site.lat">
+        <input id="end-lon" inputmode="decimal" autocomplete="off" data-i18n-title="site.lon">
+      </div>
+      <p class="error" id="section-error" role="alert"></p>
+      <p class="hint" data-i18n="site.clickhint"></p>
+      <p class="midpoint" id="midpoint"></p>
+      <h2><label for="material" data-i18n="site.material"></label></h2>
+      <select id="material"></select>
+      <button type="button" class="primary" id="find" data-i18n="site.find" disabled></button>
+    </section>
+
+    <section class="panel" id="results" hidden>
+      <h2 id="results-title"></h2>
+      <p class="hint" data-i18n="site.results.to_midpoint"></p>
+      <p id="results-none" hidden data-i18n="site.results.none"></p>
+      <table class="list" id="list">
+        <thead><tr>
+          <th data-i18n="site.col.rank"></th><th data-i18n="site.col.quarry"></th><th class="num" data-i18n="site.col.total"></th>
+        </tr></thead>
+        <tbody id="list-body"></tbody>
+      </table>
+      <div class="actions">
+        <button type="button" id="more" data-i18n="site.more" hidden></button>
+        <button type="button" id="export" data-i18n="site.export"></button>
+        <button type="button" id="print" data-i18n="site.print"></button>
+      </div>
+    </section>
+  </div>
+
+  <div class="right">
+    <div id="map" class="map"></div>
+    <ul class="legend" id="legend"></ul>
+    <section class="panel card" id="card">
+      <p class="hint" data-i18n="site.card.select"></p>
+    </section>
+  </div>
+</main>
+
+<section id="print-view" class="print-only"></section>
+
+<footer class="foot" id="foot"></footer>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
